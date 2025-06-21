@@ -89,21 +89,25 @@ namespace kittens
     }
 
     template <typename T, typename RH>
-    void assert_equal(std::vector<T> const &lhs, RH const &rhs)
+    void assert_equal(std::vector<T> const &expected, RH const &actual)
     {
-        int N = lhs.size();
+        int N = expected.size();
         int num_errors = 0;
         constexpr int max_errors = 50;
         constexpr float epsilon = 2e-2;
         for (int i = 0; i < N; i++)
-            if (std::abs(lhs[i] - rhs[i]) > epsilon)
+            if (std::abs(expected[i] - actual[i]) > epsilon)
             {
                 if (num_errors < max_errors)
-                    std::cout << "Error at index " << i << ": " << static_cast<float>(lhs[i]) << " != " << static_cast<float>(rhs[i]) << std::endl;
+                    std::cout << "Error at index " << i << ": Expected " << static_cast<float>(expected[i]) << " != Actual " << static_cast<float>(actual[i]) << std::endl;
                 num_errors++;
             }
+            else if (max_errors > 100)
+            {
+                std::cout << "OK at index " << i << ": Expected " << static_cast<float>(expected[i]) << " == Actual " << static_cast<float>(actual[i]) << std::endl;
+            }
         if (num_errors > max_errors)
-            std::cout << "... and " << num_errors - max_errors << " more errors" << std::endl;
+            std::cout << "... and " << num_errors - max_errors << " more errors (" << num_errors << " total)" << std::endl;
         else if (num_errors == 0)
             std::cout << "No errors" << std::endl;
     }
