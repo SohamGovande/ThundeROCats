@@ -6,6 +6,7 @@
 #include <concepts>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 
 static int seed = 0;
 
@@ -89,26 +90,46 @@ namespace kittens
     }
 
     template <typename T, typename RH>
-    void assert_equal(std::vector<T> const &expected, RH const &actual)
+    void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilon = 5e-2, float acceptable_error_ratio = 0.01, int max_errors_to_print = 50)
     {
         int N = expected.size();
         int num_errors = 0;
-        constexpr int max_errors = 50;
-        constexpr float epsilon = 5e-2;
+        int acceptable_errors = static_cast<int>(acceptable_error_ratio * N);
+
+        std::stringstream ss;
+        std::vector<T> diff_between(N);
+        std::vector<double> errors;
+
         for (int i = 0; i < N; i++)
-            if (std::abs(expected[i] - actual[i]) > epsilon)
+        {
+            double error = std::abs(expected[i] - actual[i]);
+            if (error > epsilon)
             {
-                if (num_errors < max_errors)
-                    std::cout << "Error at index " << i << ": Expected " << static_cast<float>(expected[i]) << " != Actual " << static_cast<float>(actual[i]) << std::endl;
                 num_errors++;
+                errors.push_back(error);
+
+                if (num_errors < max_errors_to_print)
+                    ss << "Error at index " << i << ": Expected " << static_cast<float>(expected[i]) << " != Actual " << static_cast<float>(actual[i]) << std::endl;
             }
-            else if (max_errors > 100)
-            {
-                std::cout << "OK at index " << i << ": Expected " << static_cast<float>(expected[i]) << " == Actual " << static_cast<float>(actual[i]) << std::endl;
-            }
-        if (num_errors > max_errors)
-            std::cout << "... and " << num_errors - max_errors << " more errors (" << num_errors << " total out of " << N << ")" << std::endl;
-        else if (num_errors == 0)
-            std::cout << "No errors" << std::endl;
+        }
+
+        if (num_errors > max_errors_to_print)
+            ss << "... and " << num_errors - max_errors_to_print << " more errors (" << num_errors << " total out of " << N << ")" << std::endl;
+
+        if (num_errors > acceptable_errors)
+        {
+            std::cout << ss.str() << std::endl;
+        }
+
+        double mean_error = std::accumulate(errors.begin(), errors.end(), 0.0) / errors.size();
+        double min_error = *std::min_element(errors.begin(), errors.end());
+        double max_error = *std::max_element(errors.begin(), errors.end());
+
+        std::cout << "--------------------------------" << std::endl;
+        std::cout << "Mean absolute error: " << std::fixed << std::setprecision(4) << mean_error << std::endl;
+        std::cout << "Min absolute error: " << std::fixed << std::setprecision(4) << min_error << std::endl;
+        std::cout << "Max absolute error: " << std::fixed << std::setprecision(4) << max_error << std::endl;
+        std::cout << "Number of errors: " << num_errors << " (out of " << N << ", " << std::fixed << std::setprecision(2) << (100.0 * num_errors / N) << "%)" << std::endl;
+        std::cout << "--------------------------------" << std::endl;
     }
 }
