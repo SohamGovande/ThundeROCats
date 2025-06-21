@@ -106,7 +106,6 @@ __device__ inline void mma_ABt(rt_fl_32x32 &c_reg, rt_bf_32x16 const &a_reg, rt_
 
     auto &a1 = reinterpret_cast<ab_t const &>(a_reg[0]);
     auto &b1 = reinterpret_cast<ab_t const &>(b_reg[0]);
-
     c = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a1, b1, c, 0, 0, 0);
 
     auto &a2 = reinterpret_cast<ab_t const &>(a_reg[4]);
