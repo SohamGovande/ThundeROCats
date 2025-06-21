@@ -89,12 +89,12 @@ __device__ inline void store(T *global, int global_rows, int global_cols, T *reg
     }
 }
 
-__device__ inline void mma(mfma_float16 &c_reg, bf16_4 &a_reg, bf16_4 &b_reg)
+__device__ inline void mma(mfma_float16 &c_reg, bf16_4 const &a_reg, bf16_4 const &b_reg)
 {
 
     c_reg = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(
-        *reinterpret_cast<__attribute__((__vector_size__(4 * sizeof(short)))) short *>(&a_reg[0]),
-        *reinterpret_cast<__attribute__((__vector_size__(4 * sizeof(short)))) short *>(&b_reg[0]),
+        *reinterpret_cast<__attribute__((__vector_size__(4 * sizeof(short)))) short const *>(&a_reg[0]),
+        *reinterpret_cast<__attribute__((__vector_size__(4 * sizeof(short)))) short const *>(&b_reg[0]),
         *reinterpret_cast<__attribute__((__vector_size__(16 * sizeof(float)))) float *>(&c_reg), 0, 0, 0);
 }
 
