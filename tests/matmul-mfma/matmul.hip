@@ -188,7 +188,7 @@ int main()
 {
     int M = BLOCK_SIZE_M * 20;
     int N = BLOCK_SIZE_N * 10;
-    int K = BLOCK_SIZE_K * 2;
+    int K = BLOCK_SIZE_K;
 
     auto [h_A, d_A] = init<fill_random, T>(M * K);
     auto [h_B, d_B] = init<fill_random, T>(K * N);

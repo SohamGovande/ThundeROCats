@@ -121,9 +121,9 @@ namespace kittens
             std::cout << ss.str() << std::endl;
         }
 
-        double mean_error = std::accumulate(errors.begin(), errors.end(), 0.0) / errors.size();
-        double min_error = *std::min_element(errors.begin(), errors.end());
-        double max_error = *std::max_element(errors.begin(), errors.end());
+        double mean_error = errors.size() > 0 ? std::accumulate(errors.begin(), errors.end(), 0.0) / errors.size() : 0;
+        double min_error = errors.size() > 0 ? *std::min_element(errors.begin(), errors.end()) : 0;
+        double max_error = errors.size() > 0 ? *std::max_element(errors.begin(), errors.end()) : 0;
 
         std::cout << "--------------------------------" << std::endl;
         std::cout << "Mean absolute error: " << std::fixed << std::setprecision(4) << mean_error << std::endl;
