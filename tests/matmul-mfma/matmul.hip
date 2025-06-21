@@ -19,11 +19,17 @@ constexpr int NUM_WAVES = 1;
 constexpr int NUM_THREADS_PER_WAVE = 64;
 constexpr int NUM_THREADS = NUM_WAVES * NUM_THREADS_PER_WAVE;
 
-constexpr int wave_tile = 2;
+constexpr int BLOCK_SIZE_M = 64;
+constexpr int BLOCK_SIZE_N = 64;
+constexpr int BLOCK_SIZE_K = 64;
 
-constexpr int BLOCK_SIZE_M = 32 * wave_tile;
-constexpr int BLOCK_SIZE_N = 32;
-constexpr int BLOCK_SIZE_K = 8;
+constexpr int MMA_ATOM_SIZE_M = 32;
+constexpr int MMA_ATOM_SIZE_N = 32;
+constexpr int MMA_ATOM_SIZE_K = 8;
+
+constexpr int WAVE_TILE_SIZE_M = BLOCK_SIZE_M / MMA_ATOM_SIZE_M;
+constexpr int WAVE_TILE_SIZE_N = BLOCK_SIZE_N / MMA_ATOM_SIZE_N;
+constexpr int WAVE_TILE_SIZE_K = BLOCK_SIZE_K / MMA_ATOM_SIZE_K;
 
 __device__ inline void load(T *global, int global_rows, int global_cols, T *reg, int tile_row_idx, int tile_col_idx)
 {
@@ -112,9 +118,10 @@ __device__ inline void mma(mfma_float16 &c_reg, bf16_4 const &a_reg, bf16_4 cons
 __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T *C, int M, int N, int K)
 {
 
-    mfma_float16 c_reg[wave_tile];
-    for (int i = 0; i < wave_tile; i++)
-        c_reg[i] = {0};
+    mfma_float16 c_reg[WAVE_TILE_SIZE_M][WAVE_TILE_SIZE_N];
+    for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
+        for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+            c_reg[i][j] = {0};
 
     auto fragC = rocwmma::fragment<rocwmma::accumulator, 32, 32, 8, rocwmma::bfloat16_t>();
     auto fragAcc = rocwmma::fragment<rocwmma::accumulator, 32, 32, 8, rocwmma::float32_t>();
@@ -122,11 +129,12 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
 
     for (int k_block = 0; k_block < K; k_block += BLOCK_SIZE_K)
     {
-        bf16_4 a_reg[wave_tile], b_reg;
+        bf16_4 a_reg[WAVE_TILE_SIZE_M], b_reg[WAVE_TILE_SIZE_N];
 
-        for (int i = 0; i < wave_tile; i++)
+        for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
             load(A, M, K, &a_reg[i][0], i, k_block / BLOCK_SIZE_K);
-        load(B, N, K, &b_reg[0], 0, k_block / BLOCK_SIZE_K);
+        for (int i = 0; i < WAVE_TILE_SIZE_N; i++)
+            load(B, N, K, &b_reg[i][0], i, k_block / BLOCK_SIZE_K);
 
         // auto fragA = rocwmma::fragment<rocwmma::matrix_a, 32, 32, 8, rocwmma::bfloat16_t, rocwmma::row_major>();
         // auto fragB = rocwmma::fragment<rocwmma::matrix_b, 32, 32, 8, rocwmma::bfloat16_t, rocwmma::col_major>();
@@ -148,17 +156,19 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
                 __syncthreads();
         }
 
-        for (int i = 0; i < wave_tile; i++)
-            mma(c_reg[i], a_reg[i], b_reg);
+        for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
+            for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+                mma(c_reg[i][j], a_reg[i], b_reg[j]);
         // mma(c_reg[1], a_reg[1], b_reg);
         // rocwmma::mma_sync(fragAcc, fragA, fragB, fragAcc);
     }
 
-    bf16_16 c_reg_half[wave_tile];
+    bf16_16 c_reg_half[WAVE_TILE_SIZE_M][WAVE_TILE_SIZE_N];
 
-    for (int j = 0; j < wave_tile; j++)
-        for (int i = 0; i < c_reg_half[0].size(); i++)
-            c_reg_half[j][i] = static_cast<bf16>(c_reg[j][i]);
+    for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
+        for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+            for (int k = 0; k < c_reg_half[i][j].size(); k++)
+                c_reg_half[i][j][k] = static_cast<bf16>(c_reg[i][j][k]);
 
     // for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
     // {
@@ -178,8 +188,9 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
     //         }
     //     __syncthreads();
     // }
-    for (int i = 0; i < 2; i++)
-        store(C, M, N, &c_reg_half[i][0], i, 0);
+    for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
+        for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+            store(C, M, N, &c_reg_half[i][j][0], i, j);
 
     // rocwmma::load_matrix_sync(fragC, c + (cRow * ldc + cCol), ldc, rocwmma::mem_row_major);
 
@@ -197,7 +208,8 @@ void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C)
 {
     dim3 block(NUM_THREADS);
     dim3 grid((M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N);
-    std::cout << "Launching with grid (" << grid.x << ", " << grid.y << ") with block " << block.x << std::endl;
+    std::cout << "Problem Shape: (" << M << ", " << N << ", " << K << ")" << std::endl;
+    std::cout << "Launching with grid (" << grid.x << ", " << grid.y << ", " << grid.z << ") with block (" << block.x << ", " << block.y << ", " << block.z << ")" << std::endl;
     float ms = 0;
 
     // warmup kernel
