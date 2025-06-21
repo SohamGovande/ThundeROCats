@@ -5,14 +5,9 @@
 using namespace kittens;
 
 using T = bf16;
-using mfma_float2 = __attribute__((__vector_size__(4 * sizeof(short)))) short;
-using mfma_bfloat8 = __attribute__((__vector_size__(8 * sizeof(short)))) short;
-using mfma_float8 = __attribute__((__vector_size__(8 * sizeof(float)))) float;
-using mfma_float16 = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using bf16_2 = std::array<bf16, 2>;
-using bf16_4 = std::array<bf16, 4>;
-using bf16_8 = std::array<bf16, 8>;
-using bf16_16 = std::array<bf16, 16>;
+using rt_fl_32x32 = std::array<float, 16>;
+using rt_bf_32x8 = std::array<bf16, 4>;
+using rt_bf_32x32 = std::array<bf16, 16>;
 
 constexpr int MMA_ATOM_SIZE_M = 32;
 constexpr int MMA_ATOM_SIZE_N = 32;
@@ -102,19 +97,21 @@ __device__ inline void store(T *global, int global_rows, int global_cols, T *reg
     }
 }
 
-__device__ inline void mma(mfma_float16 &c_reg, bf16_4 const &a_reg, bf16_4 const &b_reg)
+__device__ inline void mma(rt_fl_32x32 &c_reg, rt_bf_32x8 const &a_reg, rt_bf_32x8 const &b_reg)
 {
+    using ab_t = __attribute__((__vector_size__(4 * sizeof(short)))) short const;
+    using cd_t = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 
-    c_reg = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(
-        *reinterpret_cast<__attribute__((__vector_size__(4 * sizeof(short)))) short const *>(&a_reg[0]),
-        *reinterpret_cast<__attribute__((__vector_size__(4 * sizeof(short)))) short const *>(&b_reg[0]),
-        *reinterpret_cast<__attribute__((__vector_size__(16 * sizeof(float)))) float *>(&c_reg), 0, 0, 0);
+    reinterpret_cast<cd_t &>(c_reg) = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(
+        *reinterpret_cast<ab_t *>(&a_reg[0]),
+        *reinterpret_cast<ab_t *>(&b_reg[0]),
+        *reinterpret_cast<cd_t *>(&c_reg), 0, 0, 0);
 }
 
 __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T *C, int M, int N, int K)
 {
 
-    mfma_float16 c_reg[WAVE_TILE_COUNT_M][WAVE_TILE_COUNT_N];
+    rt_fl_32x32 c_reg[WAVE_TILE_COUNT_M][WAVE_TILE_COUNT_N];
 
     int waveid = threadIdx.x / NUM_THREADS_PER_WAVE;
     int waveid_m = waveid / BLOCK_WAVE_COUNT_N;
@@ -130,7 +127,7 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
     // GEMM mainloop
     for (int k_block = 0; k_block < K; k_block += WAVE_SIZE_K)
     {
-        bf16_4 a_reg[WAVE_TILE_COUNT_M], b_reg[WAVE_TILE_COUNT_N];
+        rt_bf_32x8 a_reg[WAVE_TILE_COUNT_M], b_reg[WAVE_TILE_COUNT_N];
 
         for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
             load(A, M, K, &a_reg[i][0], wave_start_m + i, k_block / WAVE_SIZE_K);
@@ -143,7 +140,7 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
     }
 
     // Convert the accumulators to bf16
-    bf16_16 c_reg_half[WAVE_TILE_COUNT_M][WAVE_TILE_COUNT_N];
+    rt_bf_32x32 c_reg_half[WAVE_TILE_COUNT_M][WAVE_TILE_COUNT_N];
 
     for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
         for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
