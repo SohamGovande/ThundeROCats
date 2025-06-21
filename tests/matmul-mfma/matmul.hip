@@ -6,12 +6,12 @@ using namespace kittens;
 
 using T = bf16;
 using rt_fl_32x32 = std::array<float, 16>;
-using rt_bf_32x8 = std::array<bf16, 4>;
+using rt_bf_32x16 = std::array<bf16, 8>;
 using rt_bf_32x32 = std::array<bf16, 16>;
 
 constexpr int MMA_ATOM_SIZE_M = 32;
 constexpr int MMA_ATOM_SIZE_N = 32;
-constexpr int MMA_ATOM_SIZE_K = 8;
+constexpr int MMA_ATOM_SIZE_K = 16;
 
 constexpr int WAVE_TILE_COUNT_M = 2;
 constexpr int WAVE_TILE_COUNT_N = 2;
@@ -34,7 +34,7 @@ constexpr int BLOCK_SIZE_K = WAVE_SIZE_K;
 
 constexpr int REG_TILE_SIZE_M = 32;
 constexpr int REG_TILE_SIZE_N = 32;
-constexpr int REG_TILE_SIZE_K = 8;
+constexpr int REG_TILE_SIZE_K = 16;
 
 static_assert(REG_TILE_SIZE_M == REG_TILE_SIZE_N, "REG_TILE_SIZE_M must be equal to REG_TILE_SIZE_N");
 
@@ -43,7 +43,7 @@ __device__ inline void load(T *global, int global_rows, int global_cols, T *reg,
     static_assert(NUM_THREADS_PER_WAVE % REG_TILE_SIZE_M == 0, "NUM_THREADS_PER_WAVE must be divisible by REG_TILE_SIZE_M");
     constexpr int contiguous_elements_to_load = REG_TILE_SIZE_K / (NUM_THREADS_PER_WAVE / REG_TILE_SIZE_M);
 
-    static_assert(contiguous_elements_to_load == 4, "TEST FAILED: contiguous_elements_to_load != 4");
+    static_assert(contiguous_elements_to_load == 8, "TEST FAILED: contiguous_elements_to_load != 8");
 
     int stride_bw_rows = global_cols;
     using T2 = std::array<T, contiguous_elements_to_load>;
@@ -97,15 +97,21 @@ __device__ inline void store(T *global, int global_rows, int global_cols, T *reg
     }
 }
 
-__device__ inline void mma(rt_fl_32x32 &c_reg, rt_bf_32x8 const &a_reg, rt_bf_32x8 const &b_reg)
+__device__ inline void mma_ABt(rt_fl_32x32 &c_reg, rt_bf_32x16 const &a_reg, rt_bf_32x16 const &b_reg)
 {
+    // Decompose the MNK=32x32x16 matmuls into two 32x32x8 matmuls that accumulate into the same registers
     using ab_t = __attribute__((__vector_size__(4 * sizeof(short)))) short const;
     using cd_t = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+    auto &c = reinterpret_cast<cd_t &>(c_reg[0]);
 
-    reinterpret_cast<cd_t &>(c_reg) = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(
-        *reinterpret_cast<ab_t *>(&a_reg[0]),
-        *reinterpret_cast<ab_t *>(&b_reg[0]),
-        *reinterpret_cast<cd_t *>(&c_reg), 0, 0, 0);
+    auto &a1 = reinterpret_cast<ab_t const &>(a_reg[0]);
+    auto &b1 = reinterpret_cast<ab_t const &>(b_reg[0]);
+
+    c = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a1, b1, c, 0, 0, 0);
+
+    auto &a2 = reinterpret_cast<ab_t const &>(a_reg[4]);
+    auto &b2 = reinterpret_cast<ab_t const &>(b_reg[4]);
+    c = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a2, b2, c, 0, 0, 0);
 }
 
 __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T *C, int M, int N, int K)
@@ -127,7 +133,7 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
     // GEMM mainloop
     for (int k_block = 0; k_block < K; k_block += WAVE_SIZE_K)
     {
-        rt_bf_32x8 a_reg[WAVE_TILE_COUNT_M], b_reg[WAVE_TILE_COUNT_N];
+        rt_bf_32x16 a_reg[WAVE_TILE_COUNT_M], b_reg[WAVE_TILE_COUNT_N];
 
         for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
             load(A, M, K, &a_reg[i][0], wave_start_m + i, k_block / WAVE_SIZE_K);
@@ -136,7 +142,7 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
 
         for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
             for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
-                mma(c_reg[i][j], a_reg[i], b_reg[j]);
+                mma_ABt(c_reg[i][j], a_reg[i], b_reg[j]);
     }
 
     // Convert the accumulators to bf16
@@ -182,7 +188,7 @@ int main()
 {
     int M = BLOCK_SIZE_M * 20;
     int N = BLOCK_SIZE_N * 10;
-    int K = BLOCK_SIZE_K * 8;
+    int K = BLOCK_SIZE_K * 2;
 
     auto [h_A, d_A] = init<fill_random, T>(M * K);
     auto [h_B, d_B] = init<fill_random, T>(K * N);
