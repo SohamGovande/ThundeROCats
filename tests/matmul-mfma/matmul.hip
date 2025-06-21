@@ -18,7 +18,10 @@ constexpr int NUM_WAVES = 1;
 
 constexpr int NUM_THREADS_PER_WAVE = 64;
 constexpr int NUM_THREADS = NUM_WAVES * NUM_THREADS_PER_WAVE;
-constexpr int BLOCK_SIZE_M = 32;
+
+constexpr int wave_tile = 2;
+
+constexpr int BLOCK_SIZE_M = 32 * wave_tile;
 constexpr int BLOCK_SIZE_N = 32;
 constexpr int BLOCK_SIZE_K = 8;
 
@@ -67,25 +70,33 @@ __device__ inline void store(T *global, int global_rows, int global_cols, T *reg
 
     static_assert(NUM_THREADS_PER_WAVE % tile_size_rows == 0, "NUM_THREADS_PER_WAVE must be divisible by tile_size_rows");
     constexpr int contiguous_elements_to_store = tile_size_cols / (NUM_THREADS_PER_WAVE / tile_size_rows);
+    constexpr bool should_swizzle_4_slices = true;
 
     int laneid = threadIdx.x % NUM_THREADS_PER_WAVE;
 
     int row_win_tile = laneid % tile_size_rows;
     int col_win_tile = (laneid / tile_size_rows) * contiguous_elements_to_store;
 
+    int global_row_start = tile_row_idx * tile_size_rows;
+    int global_col_start = tile_col_idx * tile_size_cols;
+
 #pragma unroll
     for (int i = 0; i < contiguous_elements_to_store; i++)
     {
-        // Assume RT is col-major and global is row-major -- need if condition to swap strides otherwise
-        int element_col = (col_win_tile + i);
-        int element_row = row_win_tile;
+        // Assume RT is col-major and global is row-major -- here, we use the (col, row) coordinates from within the tile instead of (row, col)
+        int global_row_offset = col_win_tile + i;
+        int global_col_offset = row_win_tile;
 
-        int col_tile_group_idx = element_col / 4;
-        int col_win_tile_group = element_col % 4;
-        // Express the following transformation: Let i = col_tile_group_idx. We need to remap i to i' such that:
-        // 0 -> 0, 1 -> 4, 2 -> 1, 3 -> 5, 4 -> 2, 5 -> 6, 6 -> 3, 7 -> 7
-        int col_win_tile_swizzled = (2 * (col_tile_group_idx % 4) + (col_tile_group_idx / 4)) * 4 + col_win_tile_group;
-        global[element_row + col_win_tile_swizzled * global_rows] = reg[i];
+        if (should_swizzle_4_slices)
+        {
+            int row_group_idx = global_row_offset / 4;
+            int row_win_tile_group = global_row_offset % 4;
+            // Express the following transformation: Let i = row_tile_group_idx. We need to remap i to i' such that:
+            // 0 -> 0, 1 -> 4, 2 -> 1, 3 -> 5, 4 -> 2, 5 -> 6, 6 -> 3, 7 -> 7
+            int row_win_tile_swizzled = (2 * (row_group_idx % 4) + (row_group_idx / 4)) * 4 + row_win_tile_group;
+            global_row_offset = row_win_tile_swizzled;
+        }
+        global[(global_row_start + global_row_offset) * global_cols + (global_col_start + global_col_offset)] = reg[i];
     }
 }
 
@@ -100,16 +111,21 @@ __device__ inline void mma(mfma_float16 &c_reg, bf16_4 const &a_reg, bf16_4 cons
 
 __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T *C, int M, int N, int K)
 {
-    mfma_float16 c_reg{0};
+
+    mfma_float16 c_reg[wave_tile];
+    for (int i = 0; i < wave_tile; i++)
+        c_reg[i] = {0};
+
     auto fragC = rocwmma::fragment<rocwmma::accumulator, 32, 32, 8, rocwmma::bfloat16_t>();
     auto fragAcc = rocwmma::fragment<rocwmma::accumulator, 32, 32, 8, rocwmma::float32_t>();
     rocwmma::fill_fragment(fragAcc, 0.0f);
 
     for (int k_block = 0; k_block < K; k_block += BLOCK_SIZE_K)
     {
-        bf16_4 a_reg, b_reg;
+        bf16_4 a_reg[wave_tile], b_reg;
 
-        load(A, M, K, &a_reg[0], 0, k_block / BLOCK_SIZE_K);
+        for (int i = 0; i < wave_tile; i++)
+            load(A, M, K, &a_reg[i][0], i, k_block / BLOCK_SIZE_K);
         load(B, N, K, &b_reg[0], 0, k_block / BLOCK_SIZE_K);
 
         // auto fragA = rocwmma::fragment<rocwmma::matrix_a, 32, 32, 8, rocwmma::bfloat16_t, rocwmma::row_major>();
@@ -132,33 +148,38 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
                 __syncthreads();
         }
 
-        mma(c_reg, a_reg, b_reg);
+        for (int i = 0; i < wave_tile; i++)
+            mma(c_reg[i], a_reg[i], b_reg);
+        // mma(c_reg[1], a_reg[1], b_reg);
         // rocwmma::mma_sync(fragAcc, fragA, fragB, fragAcc);
     }
 
-    bf16_16 c_reg_half;
+    bf16_16 c_reg_half[wave_tile];
 
-    for (int i = 0; i < c_reg_half.size(); i++)
-        c_reg_half[i] = static_cast<bf16>(c_reg[i]);
+    for (int j = 0; j < wave_tile; j++)
+        for (int i = 0; i < c_reg_half[0].size(); i++)
+            c_reg_half[j][i] = static_cast<bf16>(c_reg[j][i]);
 
     // for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
     // {
-    // if (threadIdx.x == i)
-    // {
-    //     printf("\nlaneid: %d, c_reg: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
-    //            threadIdx.x,
-    //            static_cast<float>(c_reg_half[0]), static_cast<float>(c_reg_half[1]),
-    //            static_cast<float>(c_reg_half[2]), static_cast<float>(c_reg_half[3]),
-    //            static_cast<float>(c_reg_half[4]), static_cast<float>(c_reg_half[5]),
-    //            static_cast<float>(c_reg_half[6]), static_cast<float>(c_reg_half[7]),
-    //            static_cast<float>(c_reg_half[8]), static_cast<float>(c_reg_half[9]),
-    //            static_cast<float>(c_reg_half[10]), static_cast<float>(c_reg_half[11]),
-    //            static_cast<float>(c_reg_half[12]), static_cast<float>(c_reg_half[13]),
-    //            static_cast<float>(c_reg_half[14]), static_cast<float>(c_reg_half[15]));
+    //     if (false)
+    //         if (threadIdx.x == i)
+    //         {
+    //             printf("\nlaneid: %d, c_reg: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
+    //                    threadIdx.x,
+    //                    static_cast<float>(c_reg_half[0]), static_cast<float>(c_reg_half[1]),
+    //                    static_cast<float>(c_reg_half[2]), static_cast<float>(c_reg_half[3]),
+    //                    static_cast<float>(c_reg_half[4]), static_cast<float>(c_reg_half[5]),
+    //                    static_cast<float>(c_reg_half[6]), static_cast<float>(c_reg_half[7]),
+    //                    static_cast<float>(c_reg_half[8]), static_cast<float>(c_reg_half[9]),
+    //                    static_cast<float>(c_reg_half[10]), static_cast<float>(c_reg_half[11]),
+    //                    static_cast<float>(c_reg_half[12]), static_cast<float>(c_reg_half[13]),
+    //                    static_cast<float>(c_reg_half[14]), static_cast<float>(c_reg_half[15]));
+    //         }
+    //     __syncthreads();
     // }
-    // __syncthreads();
-    // }
-    store(C, M, N, &c_reg_half[0], 0, 0);
+    for (int i = 0; i < 2; i++)
+        store(C, M, N, &c_reg_half[i][0], i, 0);
 
     // rocwmma::load_matrix_sync(fragC, c + (cRow * ldc + cCol), ldc, rocwmma::mem_row_major);
 
@@ -176,6 +197,7 @@ void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C)
 {
     dim3 block(NUM_THREADS);
     dim3 grid((M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N);
+    std::cout << "Launching with grid (" << grid.x << ", " << grid.y << ") with block " << block.x << std::endl;
     float ms = 0;
 
     // warmup kernel
@@ -197,9 +219,9 @@ void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C)
 
 int main()
 {
-    int M = 32;
-    int N = 32;
-    int K = 32;
+    int M = BLOCK_SIZE_M;
+    int N = BLOCK_SIZE_N;
+    int K = 8;
 
     auto [h_A, d_A] = init<fill_random, T>(M * K);
     auto [h_B, d_B] = init<fill_random, T>(K * N);
