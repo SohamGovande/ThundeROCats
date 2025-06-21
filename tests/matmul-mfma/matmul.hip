@@ -21,7 +21,7 @@ constexpr int NUM_THREADS = NUM_WAVES * NUM_THREADS_PER_WAVE;
 
 constexpr int BLOCK_SIZE_M = 64;
 constexpr int BLOCK_SIZE_N = 64;
-constexpr int BLOCK_SIZE_K = 64;
+constexpr int BLOCK_SIZE_K = 8;
 
 constexpr int MMA_ATOM_SIZE_M = 32;
 constexpr int MMA_ATOM_SIZE_N = 32;
@@ -233,7 +233,7 @@ int main()
 {
     int M = BLOCK_SIZE_M;
     int N = BLOCK_SIZE_N;
-    int K = 8;
+    int K = BLOCK_SIZE_K * 8;
 
     auto [h_A, d_A] = init<fill_random, T>(M * K);
     auto [h_B, d_B] = init<fill_random, T>(K * N);
