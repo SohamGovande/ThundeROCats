@@ -46,15 +46,15 @@ __device__ inline void load(T *global, int global_rows, int global_cols, T *reg,
         // Col
         (tile_col_idx * tile_size_cols + col_win_tile)];
 
-    for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
-    {
-        if (false)
-            if (threadIdx.x == i)
-            {
-                printf("\nlaneid: %d, row_win_tile: %d, col_win_tile: %d, contiguous_elements_to_load: %d, global_start: %.3f", threadIdx.x, row_win_tile, col_win_tile, contiguous_elements_to_load, static_cast<float>(*global_ptr));
-            }
-        __syncthreads();
-    }
+    // for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
+    // {
+    //     if (false)
+    //         if (threadIdx.x == i)
+    //         {
+    //             printf("\nlaneid: %d, row_win_tile: %d, col_win_tile: %d, contiguous_elements_to_load: %d, global_start: %.3f", threadIdx.x, row_win_tile, col_win_tile, contiguous_elements_to_load, static_cast<float>(*global_ptr));
+    //         }
+    //     __syncthreads();
+    // }
 
     // Assume both global and reg are row-major
     *reinterpret_cast<T2 *>(reg) = *reinterpret_cast<T2 *>(global_ptr);
@@ -100,53 +100,76 @@ __device__ inline void mma(mfma_float16 &c_reg, bf16_4 const &a_reg, bf16_4 cons
 
 __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T *C, int M, int N, int K)
 {
-    bf16_4 a_reg, b_reg;
     mfma_float16 c_reg{0};
+    auto fragC = rocwmma::fragment<rocwmma::accumulator, 32, 32, 8, rocwmma::bfloat16_t>();
+    auto fragAcc = rocwmma::fragment<rocwmma::accumulator, 32, 32, 8, rocwmma::float32_t>();
+    rocwmma::fill_fragment(fragAcc, 0.0f);
 
-    load(A, M, K, &a_reg[0], 0, 0);
-    load(B, N, K, &b_reg[0], 0, 0);
-
-    for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
+    for (int k_block = 0; k_block < K; k_block += BLOCK_SIZE_K)
     {
-        if (false)
-            if (threadIdx.x == i)
-            {
-                printf("\nlaneid: %d, a_reg: %.3f %.3f %.3f %.3f, b_reg: %.3f %.3f %.3f %.3f, a_acc: %.3f %.3f %.3f %.3f, b_acc: %.3f %.3f %.3f %.3f",
-                       threadIdx.x,
-                       static_cast<float>(a_reg[0]), static_cast<float>(a_reg[1]), static_cast<float>(a_reg[2]), static_cast<float>(a_reg[3]),
-                       static_cast<float>(b_reg[0]), static_cast<float>(b_reg[1]), static_cast<float>(b_reg[2]), static_cast<float>(b_reg[3]),
-                       static_cast<float>(fragA.x[0]), static_cast<float>(fragA.x[1]), static_cast<float>(fragA.x[2]), static_cast<float>(fragA.x[3]),
-                       static_cast<float>(fragB.x[0]), static_cast<float>(fragB.x[1]), static_cast<float>(fragB.x[2]), static_cast<float>(fragB.x[3]));
-            }
-        __syncthreads();
-    }
+        bf16_4 a_reg, b_reg;
 
-    mma(c_reg, a_reg, b_reg);
+        load(A, M, K, &a_reg[0], 0, k_block / BLOCK_SIZE_K);
+        load(B, N, K, &b_reg[0], 0, k_block / BLOCK_SIZE_K);
+
+        // auto fragA = rocwmma::fragment<rocwmma::matrix_a, 32, 32, 8, rocwmma::bfloat16_t, rocwmma::row_major>();
+        // auto fragB = rocwmma::fragment<rocwmma::matrix_b, 32, 32, 8, rocwmma::bfloat16_t, rocwmma::col_major>();
+        // rocwmma::load_matrix_sync(fragA, A + (0 * K + k_block), K);
+        // rocwmma::load_matrix_sync(fragB, B + (0 * K + k_block), K);
+
+        for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
+        {
+            if (false)
+                // if (threadIdx.x == i)
+                // {
+                //     printf("\nlaneid: %d, a_reg: %.3f %.3f %.3f %.3f, b_reg: %.3f %.3f %.3f %.3f, a_acc: %.3f %.3f %.3f %.3f, b_acc: %.3f %.3f %.3f %.3f",
+                //            threadIdx.x,
+                //            static_cast<float>(a_reg[0]), static_cast<float>(a_reg[1]), static_cast<float>(a_reg[2]), static_cast<float>(a_reg[3]),
+                //            static_cast<float>(b_reg[0]), static_cast<float>(b_reg[1]), static_cast<float>(b_reg[2]), static_cast<float>(b_reg[3]),
+                //            static_cast<float>(fragA.x[0]), static_cast<float>(fragA.x[1]), static_cast<float>(fragA.x[2]), static_cast<float>(fragA.x[3]),
+                //            static_cast<float>(fragB.x[0]), static_cast<float>(fragB.x[1]), static_cast<float>(fragB.x[2]), static_cast<float>(fragB.x[3]));
+                // }
+                __syncthreads();
+        }
+
+        mma(c_reg, a_reg, b_reg);
+        // rocwmma::mma_sync(fragAcc, fragA, fragB, fragAcc);
+    }
 
     bf16_16 c_reg_half;
 
     for (int i = 0; i < c_reg_half.size(); i++)
         c_reg_half[i] = static_cast<bf16>(c_reg[i]);
 
-    for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
-    {
-        if (false)
-            if (threadIdx.x == i)
-            {
-                printf("\nlaneid: %d, c_reg: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
-                       threadIdx.x,
-                       static_cast<float>(c_reg_half[0]), static_cast<float>(c_reg_half[1]),
-                       static_cast<float>(c_reg_half[2]), static_cast<float>(c_reg_half[3]),
-                       static_cast<float>(c_reg_half[4]), static_cast<float>(c_reg_half[5]),
-                       static_cast<float>(c_reg_half[6]), static_cast<float>(c_reg_half[7]),
-                       static_cast<float>(c_reg_half[8]), static_cast<float>(c_reg_half[9]),
-                       static_cast<float>(c_reg_half[10]), static_cast<float>(c_reg_half[11]),
-                       static_cast<float>(c_reg_half[12]), static_cast<float>(c_reg_half[13]),
-                       static_cast<float>(c_reg_half[14]), static_cast<float>(c_reg_half[15]));
-            }
-        __syncthreads();
-    }
+    // for (int i = 0; i < NUM_THREADS_PER_WAVE; i++)
+    // {
+    // if (threadIdx.x == i)
+    // {
+    //     printf("\nlaneid: %d, c_reg: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
+    //            threadIdx.x,
+    //            static_cast<float>(c_reg_half[0]), static_cast<float>(c_reg_half[1]),
+    //            static_cast<float>(c_reg_half[2]), static_cast<float>(c_reg_half[3]),
+    //            static_cast<float>(c_reg_half[4]), static_cast<float>(c_reg_half[5]),
+    //            static_cast<float>(c_reg_half[6]), static_cast<float>(c_reg_half[7]),
+    //            static_cast<float>(c_reg_half[8]), static_cast<float>(c_reg_half[9]),
+    //            static_cast<float>(c_reg_half[10]), static_cast<float>(c_reg_half[11]),
+    //            static_cast<float>(c_reg_half[12]), static_cast<float>(c_reg_half[13]),
+    //            static_cast<float>(c_reg_half[14]), static_cast<float>(c_reg_half[15]));
+    // }
+    // __syncthreads();
+    // }
     store(C, M, N, &c_reg_half[0], 0, 0);
+
+    // rocwmma::load_matrix_sync(fragC, c + (cRow * ldc + cCol), ldc, rocwmma::mem_row_major);
+
+    // D = alpha * A x B + beta * C
+    // for (int i = 0; i < fragC.num_elements; ++i)
+    // {
+    //     fragC.x[i] = fragAcc.x[i];
+    // }
+
+    // Store to D
+    // rocwmma::store_matrix_sync(C, fragC, N, rocwmma::mem_row_major);
 }
 
 void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C)
@@ -176,7 +199,7 @@ int main()
 {
     int M = 32;
     int N = 32;
-    int K = 8;
+    int K = 32;
 
     auto [h_A, d_A] = init<fill_random, T>(M * K);
     auto [h_B, d_B] = init<fill_random, T>(K * N);

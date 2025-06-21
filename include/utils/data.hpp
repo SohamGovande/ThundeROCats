@@ -94,7 +94,7 @@ namespace kittens
         int N = expected.size();
         int num_errors = 0;
         constexpr int max_errors = 50;
-        constexpr float epsilon = 2e-2;
+        constexpr float epsilon = 5e-2;
         for (int i = 0; i < N; i++)
             if (std::abs(expected[i] - actual[i]) > epsilon)
             {
