@@ -14,30 +14,39 @@ using bf16_4 = std::array<bf16, 4>;
 using bf16_8 = std::array<bf16, 8>;
 using bf16_16 = std::array<bf16, 16>;
 
-constexpr int NUM_WAVES = 1;
-
-constexpr int NUM_THREADS_PER_WAVE = 64;
-constexpr int NUM_THREADS = NUM_WAVES * NUM_THREADS_PER_WAVE;
-
-constexpr int BLOCK_SIZE_M = 64;
-constexpr int BLOCK_SIZE_N = 64;
-constexpr int BLOCK_SIZE_K = 8;
-
 constexpr int MMA_ATOM_SIZE_M = 32;
 constexpr int MMA_ATOM_SIZE_N = 32;
 constexpr int MMA_ATOM_SIZE_K = 8;
 
-constexpr int WAVE_TILE_SIZE_M = BLOCK_SIZE_M / MMA_ATOM_SIZE_M;
-constexpr int WAVE_TILE_SIZE_N = BLOCK_SIZE_N / MMA_ATOM_SIZE_N;
-constexpr int WAVE_TILE_SIZE_K = BLOCK_SIZE_K / MMA_ATOM_SIZE_K;
+constexpr int WAVE_TILE_COUNT_M = 2;
+constexpr int WAVE_TILE_COUNT_N = 2;
+constexpr int WAVE_TILE_COUNT_K = 1;
+
+constexpr int WAVE_SIZE_M = MMA_ATOM_SIZE_M * WAVE_TILE_COUNT_M;
+constexpr int WAVE_SIZE_N = MMA_ATOM_SIZE_N * WAVE_TILE_COUNT_N;
+constexpr int WAVE_SIZE_K = MMA_ATOM_SIZE_K * WAVE_TILE_COUNT_K;
+
+constexpr int BLOCK_WAVE_COUNT_M = 2;
+constexpr int BLOCK_WAVE_COUNT_N = 2;
+constexpr int NUM_WAVES = BLOCK_WAVE_COUNT_M * BLOCK_WAVE_COUNT_N;
+constexpr int NUM_THREADS_PER_WAVE = warpSize;
+static_assert(NUM_THREADS_PER_WAVE == 64, "NUM_THREADS_PER_WAVE must be equal to 64. This was what the code was written for.");
+constexpr int NUM_THREADS = BLOCK_WAVE_COUNT_M * BLOCK_WAVE_COUNT_N * NUM_THREADS_PER_WAVE;
+
+constexpr int BLOCK_SIZE_M = WAVE_SIZE_M * BLOCK_WAVE_COUNT_M;
+constexpr int BLOCK_SIZE_N = WAVE_SIZE_N * BLOCK_WAVE_COUNT_N;
+constexpr int BLOCK_SIZE_K = WAVE_SIZE_K;
+
+constexpr int REG_TILE_SIZE_M = 32;
+constexpr int REG_TILE_SIZE_N = 32;
+constexpr int REG_TILE_SIZE_K = 8;
+
+static_assert(REG_TILE_SIZE_M == REG_TILE_SIZE_N, "REG_TILE_SIZE_M must be equal to REG_TILE_SIZE_N");
 
 __device__ inline void load(T *global, int global_rows, int global_cols, T *reg, int tile_row_idx, int tile_col_idx)
 {
-    constexpr int tile_size_rows = 32;
-    constexpr int tile_size_cols = 8;
-
-    static_assert(NUM_THREADS_PER_WAVE % tile_size_rows == 0, "NUM_THREADS_PER_WAVE must be divisible by tile_size_rows");
-    constexpr int contiguous_elements_to_load = tile_size_cols / (NUM_THREADS_PER_WAVE / tile_size_rows);
+    static_assert(NUM_THREADS_PER_WAVE % REG_TILE_SIZE_M == 0, "NUM_THREADS_PER_WAVE must be divisible by REG_TILE_SIZE_M");
+    constexpr int contiguous_elements_to_load = REG_TILE_SIZE_K / (NUM_THREADS_PER_WAVE / REG_TILE_SIZE_M);
 
     static_assert(contiguous_elements_to_load == 4, "TEST FAILED: contiguous_elements_to_load != 4");
 
@@ -46,14 +55,14 @@ __device__ inline void load(T *global, int global_rows, int global_cols, T *reg,
 
     int laneid = threadIdx.x % NUM_THREADS_PER_WAVE;
 
-    int row_win_tile = laneid % tile_size_rows;
-    int col_win_tile = (laneid / tile_size_rows) * contiguous_elements_to_load;
+    int row_win_tile = laneid % REG_TILE_SIZE_M;
+    int col_win_tile = (laneid / REG_TILE_SIZE_M) * contiguous_elements_to_load;
 
     auto global_ptr = &global[
         // Row
-        (tile_row_idx * tile_size_rows + row_win_tile) * stride_bw_rows +
+        (tile_row_idx * REG_TILE_SIZE_M + row_win_tile) * stride_bw_rows +
         // Col
-        (tile_col_idx * tile_size_cols + col_win_tile)];
+        (tile_col_idx * REG_TILE_SIZE_K + col_win_tile)];
 
     // Assume both global and reg are row-major
     *reinterpret_cast<T2 *>(reg) = *reinterpret_cast<T2 *>(global_ptr);
@@ -61,20 +70,17 @@ __device__ inline void load(T *global, int global_rows, int global_cols, T *reg,
 
 __device__ inline void store(T *global, int global_rows, int global_cols, T *reg, int tile_row_idx, int tile_col_idx)
 {
-    constexpr int tile_size_rows = 32;
-    constexpr int tile_size_cols = 32;
-
-    static_assert(NUM_THREADS_PER_WAVE % tile_size_rows == 0, "NUM_THREADS_PER_WAVE must be divisible by tile_size_rows");
-    constexpr int contiguous_elements_to_store = tile_size_cols / (NUM_THREADS_PER_WAVE / tile_size_rows);
+    static_assert(NUM_THREADS_PER_WAVE % REG_TILE_SIZE_M == 0, "NUM_THREADS_PER_WAVE must be divisible by REG_TILE_SIZE_M");
+    constexpr int contiguous_elements_to_store = REG_TILE_SIZE_N / (NUM_THREADS_PER_WAVE / REG_TILE_SIZE_M);
     constexpr bool should_swizzle_4_slices = true;
 
     int laneid = threadIdx.x % NUM_THREADS_PER_WAVE;
 
-    int row_win_tile = laneid % tile_size_rows;
-    int col_win_tile = (laneid / tile_size_rows) * contiguous_elements_to_store;
+    int row_win_tile = laneid % REG_TILE_SIZE_M;
+    int col_win_tile = (laneid / REG_TILE_SIZE_M) * contiguous_elements_to_store;
 
-    int global_row_start = tile_row_idx * tile_size_rows;
-    int global_col_start = tile_col_idx * tile_size_cols;
+    int global_row_start = tile_row_idx * REG_TILE_SIZE_M;
+    int global_col_start = tile_col_idx * REG_TILE_SIZE_N;
 
 #pragma unroll
     for (int i = 0; i < contiguous_elements_to_store; i++)
@@ -108,45 +114,51 @@ __device__ inline void mma(mfma_float16 &c_reg, bf16_4 const &a_reg, bf16_4 cons
 __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T *C, int M, int N, int K)
 {
 
-    mfma_float16 c_reg[WAVE_TILE_SIZE_M][WAVE_TILE_SIZE_N];
+    mfma_float16 c_reg[WAVE_TILE_COUNT_M][WAVE_TILE_COUNT_N];
+
+    int waveid = threadIdx.x / NUM_THREADS_PER_WAVE;
+    int waveid_m = waveid / BLOCK_WAVE_COUNT_N;
+    int waveid_n = waveid % BLOCK_WAVE_COUNT_N;
+    int wave_start_m = blockIdx.x * (BLOCK_SIZE_M / REG_TILE_SIZE_M) + waveid_m * (WAVE_SIZE_M / REG_TILE_SIZE_M);
+    int wave_start_n = blockIdx.y * (BLOCK_SIZE_N / REG_TILE_SIZE_N) + waveid_n * (WAVE_SIZE_N / REG_TILE_SIZE_N);
 
     // Zero the accumulators
-    for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
-        for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+    for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
+        for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
             c_reg[i][j] = {0};
 
     // GEMM mainloop
-    for (int k_block = 0; k_block < K; k_block += BLOCK_SIZE_K)
+    for (int k_block = 0; k_block < K; k_block += WAVE_SIZE_K)
     {
-        bf16_4 a_reg[WAVE_TILE_SIZE_M], b_reg[WAVE_TILE_SIZE_N];
+        bf16_4 a_reg[WAVE_TILE_COUNT_M], b_reg[WAVE_TILE_COUNT_N];
 
-        for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
-            load(A, M, K, &a_reg[i][0], i, k_block / BLOCK_SIZE_K);
-        for (int i = 0; i < WAVE_TILE_SIZE_N; i++)
-            load(B, N, K, &b_reg[i][0], i, k_block / BLOCK_SIZE_K);
+        for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
+            load(A, M, K, &a_reg[i][0], wave_start_m + i, k_block / WAVE_SIZE_K);
+        for (int i = 0; i < WAVE_TILE_COUNT_N; i++)
+            load(B, N, K, &b_reg[i][0], wave_start_n + i, k_block / WAVE_SIZE_K);
 
-        for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
-            for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+        for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
+            for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
                 mma(c_reg[i][j], a_reg[i], b_reg[j]);
     }
 
     // Convert the accumulators to bf16
-    bf16_16 c_reg_half[WAVE_TILE_SIZE_M][WAVE_TILE_SIZE_N];
+    bf16_16 c_reg_half[WAVE_TILE_COUNT_M][WAVE_TILE_COUNT_N];
 
-    for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
-        for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
+    for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
+        for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
             for (int k = 0; k < c_reg_half[i][j].size(); k++)
                 c_reg_half[i][j][k] = static_cast<bf16>(c_reg[i][j][k]);
 
     // Store the accumulators to global memory
-    for (int i = 0; i < WAVE_TILE_SIZE_M; i++)
-        for (int j = 0; j < WAVE_TILE_SIZE_N; j++)
-            store(C, M, N, &c_reg_half[i][j][0], i, j);
+    for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
+        for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
+            store(C, M, N, &c_reg_half[i][j][0], wave_start_m + i, wave_start_n + j);
 }
 
 void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C)
 {
-    dim3 block(NUM_THREADS);
+    dim3 block(NUM_THREADS_PER_WAVE * NUM_WAVES);
     dim3 grid((M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N);
     std::cout << "Problem Shape: (" << M << ", " << N << ", " << K << ")" << std::endl;
     std::cout << "Launching with grid (" << grid.x << ", " << grid.y << ", " << grid.z << ") with block (" << block.x << ", " << block.y << ", " << block.z << ")" << std::endl;
@@ -171,8 +183,8 @@ void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C)
 
 int main()
 {
-    int M = BLOCK_SIZE_M;
-    int N = BLOCK_SIZE_N;
+    int M = BLOCK_SIZE_M * 20;
+    int N = BLOCK_SIZE_N * 10;
     int K = BLOCK_SIZE_K * 8;
 
     auto [h_A, d_A] = init<fill_random, T>(M * K);
