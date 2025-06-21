@@ -107,7 +107,7 @@ namespace kittens
                 std::cout << "OK at index " << i << ": Expected " << static_cast<float>(expected[i]) << " == Actual " << static_cast<float>(actual[i]) << std::endl;
             }
         if (num_errors > max_errors)
-            std::cout << "... and " << num_errors - max_errors << " more errors (" << num_errors << " total)" << std::endl;
+            std::cout << "... and " << num_errors - max_errors << " more errors (" << num_errors << " total out of " << N << ")" << std::endl;
         else if (num_errors == 0)
             std::cout << "No errors" << std::endl;
     }
