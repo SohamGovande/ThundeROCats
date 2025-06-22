@@ -1,5 +1,5 @@
 #pragma once
-#include "utils.hpp"
+#include "check.hpp"
 #include <string>
 
 namespace kittens {
