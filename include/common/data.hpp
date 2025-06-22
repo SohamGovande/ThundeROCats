@@ -46,7 +46,7 @@ std::pair<std::vector<T>, T *> init(int N) {
   fill_type fill;
   if (fill.has_value())
     for (int i = 0; i < N; i++)
-      h_data[i] = static_cast<T>(fill.value());
+      h_data[i] = base_types::convertor<T, float>::convert(fill.value());
 
   T *d_data;
   hipCheck(hipMalloc((void **)&d_data, N * sizeof(T)));
@@ -79,7 +79,7 @@ void print_tensor_to_file(std::string const &filename, std::vector<std::tuple<st
 }
 
 template <typename T, typename RH>
-void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilon = 5e-2, float acceptable_error_ratio = 0.01, int max_errors_to_print = 50) {
+void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilon = 5e-2, float acceptable_error_ratio = 0.01, int max_errors_to_print = 20) {
   int N = expected.size();
   int num_errors = 0;
   int acceptable_errors = static_cast<int>(acceptable_error_ratio * N);
@@ -90,6 +90,9 @@ void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilo
 
   for (int i = 0; i < N; i++) {
     double error = static_cast<double>(std::abs(base_types::convertor<float, T>::convert(expected[i]) - base_types::convertor<float, T>::convert(actual[i])));
+    if (std::isnan(error)) {
+      error = 10000.0; // force NaNs to show up - otherwise they are ignored
+    }
     if (error > epsilon) {
       num_errors++;
       errors.push_back(error);

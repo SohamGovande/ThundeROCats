@@ -9,9 +9,10 @@ void cpu_matmul(T *A, T *B, T *C, int M, int N, int K) {
       for (int k = 0; k < K; k++) {
         T &a_elem = should_transpose_A ? A[k * M + i] : A[i * K + k];
         T &b_elem = should_transpose_B ? B[j * K + k] : B[k * N + j];
-        sum += base_types::convertor<float, T>::convert(a_elem * b_elem);
+        auto product = base_types::convertor<float, T>::convert(a_elem * b_elem);
+        sum += product;
       }
-      C[i * N + j] = static_cast<T>(sum);
+      C[i * N + j] = base_types::convertor<T, float>::convert(sum);
     }
   }
 }
