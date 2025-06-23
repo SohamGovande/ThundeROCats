@@ -6,7 +6,7 @@
 namespace kittens {
 
 template <int M, int N, int K>
-__device__ inline void mm_ABt(rt_fl<M, N, ducks::rt_layout::col> &c_reg, rt_bf<M, K, ducks::rt_layout::row> const &a_reg, rt_bf<N, K, ducks::rt_layout::row> const &b_reg) {
+__device__ inline void mma_ABt(rt_fl<M, N, ducks::rt_layout::col> &c_reg, rt_bf<M, K, ducks::rt_layout::row> const &a_reg, rt_bf<N, K, ducks::rt_layout::row> const &b_reg) {
   static_assert(M % 32 == 0, "M must be divisible by 32");
   static_assert(N % 32 == 0, "N must be divisible by 32");
   static_assert(K % 16 == 0, "K must be divisible by 16");

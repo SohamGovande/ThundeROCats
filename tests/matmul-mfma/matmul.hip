@@ -6,7 +6,7 @@ using namespace kittens;
 namespace mm_ABt_ker {
 struct layout {
   // base sizes - feel free to change M/N dimensions on these
-  static constexpr coord_mnk wave_tile_count{1, 1, 1};
+  static constexpr coord_mnk wave_tile_count{2, 2, 1};
   static constexpr coord_mnk block_wave_count{2, 2, 1};
 
   // derived  (or constant) sizes - do not change these
@@ -54,7 +54,7 @@ __global__ __launch_bounds__(layout::num_threads) void gpu_matmul_ABt_ker(mm_ABt
   for (int k_block = 0; k_block < g.A.cols(); k_block += layout::wave_size.k) {
     load(l.a_reg, g.A, {wave_start_m, k_block / layout::wave_size.k});
     load(l.b_reg, g.B, {wave_start_n, k_block / layout::wave_size.k});
-    mm_ABt(l.c_reg, l.a_reg, l.b_reg);
+    mma_ABt(l.c_reg, l.a_reg, l.b_reg);
   }
   copy(l.c_reg_half, l.c_reg);
   store(g.C, l.c_reg_half, {wave_start_m, wave_start_n});
@@ -92,9 +92,9 @@ void gpu_matmul_ABt(bf16 *A, bf16 *B, bf16 *C, int M, int N, int K, std::vector<
 }
 
 int main() {
-  int M = layout::block_size.m * 20;
-  int N = layout::block_size.n * 10;
-  int K = layout::block_size.k * 5;
+  int M = layout::block_size.m;
+  int N = layout::block_size.n;
+  int K = layout::block_size.k;
 
   auto [h_A, d_A] = init<fill_random, bf16>(M * K);
   auto [h_B, d_B] = init<fill_random, bf16>(K * N);
