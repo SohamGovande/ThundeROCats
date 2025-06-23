@@ -78,22 +78,22 @@ struct constants {
    * @brief Zero
    * @return Constexpr zero with type T
    */
-  static __device__ inline todo_constexpr T zero() { return T{0}; }
+  static __device__ inline constexpr T zero() { return T{0}; }
   /**
    * @brief One
    * @return Constexpr one with type T
    */
-  static __device__ inline todo_constexpr T one() { return T{1}; }
+  static __device__ inline constexpr T one() { return T{1}; }
   /**
    * @brief Positive infinity. Particularly useful for initializing before a min op.
    * @return Constexpr positive infinity with type T
    */
-  static __device__ inline todo_constexpr T pos_infty() { return T{INFINITY}; } // I'll find a better way at some point but this appears to work.
+  static __device__ inline constexpr T pos_infty() { return T{INFINITY}; } // I'll find a better way at some point but this appears to work.
   /**
    * @brief Negative infinity. Particularly useful for initializing before a max op.
    * @return Constexpr negative infinity with type T
    */
-  static __device__ inline todo_constexpr T neg_infty() { return T{-INFINITY}; }
+  static __device__ inline constexpr T neg_infty() { return T{-INFINITY}; }
 };
 template <>
 struct constants<float2> {
@@ -104,24 +104,24 @@ struct constants<float2> {
 };
 template <>
 struct constants<bf16> {
-  static __device__ inline todo_constexpr bf16 zero() { return std::bit_cast<__hip_bfloat16>(uint16_t(0x0000)); } // unfortunately __float2bf16_rn is not todo_constexpr
-  static __device__ inline todo_constexpr bf16 one() { return std::bit_cast<__hip_bfloat16>(uint16_t(0x3F80)); }
-  static __device__ inline todo_constexpr bf16 pos_infty() { return std::bit_cast<__hip_bfloat16>(uint16_t(0x7F80)); }
-  static __device__ inline todo_constexpr bf16 neg_infty() { return std::bit_cast<__hip_bfloat16>(uint16_t(0xFF80)); }
+  static __device__ inline constexpr bf16 zero() { return std::bit_cast<__hip_bfloat16>(uint16_t(0x0000)); } // unfortunately __float2bf16_rn is not todo_constexpr
+  static __device__ inline constexpr bf16 one() { return std::bit_cast<__hip_bfloat16>(uint16_t(0x3F80)); }
+  static __device__ inline constexpr bf16 pos_infty() { return std::bit_cast<__hip_bfloat16>(uint16_t(0x7F80)); }
+  static __device__ inline constexpr bf16 neg_infty() { return std::bit_cast<__hip_bfloat16>(uint16_t(0xFF80)); }
 };
 template <>
 struct constants<bf16_2> {
-  static __device__ inline todo_constexpr bf16_2 zero() { return bf16_2{constants<bf16>::zero(), constants<bf16>::zero()}; }
-  static __device__ inline todo_constexpr bf16_2 one() { return bf16_2{constants<bf16>::one(), constants<bf16>::one()}; }
-  static __device__ inline todo_constexpr bf16_2 pos_infty() { return bf16_2{constants<bf16>::pos_infty(), constants<bf16>::pos_infty()}; }
-  static __device__ inline todo_constexpr bf16_2 neg_infty() { return bf16_2{constants<bf16>::neg_infty(), constants<bf16>::neg_infty()}; }
+  static __device__ inline constexpr bf16_2 zero() { return bf16_2{constants<bf16>::zero(), constants<bf16>::zero()}; }
+  static __device__ inline constexpr bf16_2 one() { return bf16_2{constants<bf16>::one(), constants<bf16>::one()}; }
+  static __device__ inline constexpr bf16_2 pos_infty() { return bf16_2{constants<bf16>::pos_infty(), constants<bf16>::pos_infty()}; }
+  static __device__ inline constexpr bf16_2 neg_infty() { return bf16_2{constants<bf16>::neg_infty(), constants<bf16>::neg_infty()}; }
 };
 template <>
 struct constants<half> {
-  static __device__ inline todo_constexpr half zero() { return std::bit_cast<__half>(uint16_t(0x0000)); }
-  static __device__ inline todo_constexpr half one() { return std::bit_cast<__half>(uint16_t(0x3C00)); }
-  static __device__ inline todo_constexpr half pos_infty() { return std::bit_cast<__half>(uint16_t(0x7C00)); }
-  static __device__ inline todo_constexpr half neg_infty() { return std::bit_cast<__half>(uint16_t(0xFC00)); }
+  static __device__ inline constexpr half zero() { return std::bit_cast<__half>(uint16_t(0x0000)); }
+  static __device__ inline constexpr half one() { return std::bit_cast<__half>(uint16_t(0x3C00)); }
+  static __device__ inline constexpr half pos_infty() { return std::bit_cast<__half>(uint16_t(0x7C00)); }
+  static __device__ inline constexpr half neg_infty() { return std::bit_cast<__half>(uint16_t(0xFC00)); }
 };
 template <>
 struct constants<half_2> {
@@ -133,8 +133,8 @@ struct constants<half_2> {
 
 template <>
 struct constants<int> {
-  static __device__ inline todo_constexpr int zero() { return 0; }
-  static __device__ inline todo_constexpr int one() { return 1; }
+  static __device__ inline constexpr int zero() { return 0; }
+  static __device__ inline constexpr int one() { return 1; }
 };
 template <>
 struct constants<int2> {
@@ -154,7 +154,7 @@ struct packing {
    *
    * @return todo_constexpr int representing number of elements within the type.
    */
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   /**
    * @brief Packs a single T element twice (replicated) into its packed type.
    *
@@ -165,70 +165,70 @@ struct packing {
 };
 template <>
 struct packing<bf16> {
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   using unpacked_type = bf16;
   using packed_type = bf16_2;
   static __device__ inline todo_constexpr bf16_2 pack(const bf16 &i) { return bf16_2{i, i}; }
 };
 template <>
 struct packing<bf16_2> {
-  static __device__ inline todo_constexpr int num() { return 2; }
+  static __device__ inline constexpr int num() { return 2; }
   using unpacked_type = bf16;
   using packed_type = bf16_2;
   static __device__ inline todo_constexpr bf16_2 pack(const bf16 &i) { return bf16_2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<half> {
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   using unpacked_type = half;
   using packed_type = half_2;
   static __device__ inline todo_constexpr half_2 pack(const half &i) { return half_2{i, i}; }
 };
 template <>
 struct packing<half_2> {
-  static __device__ inline todo_constexpr int num() { return 2; }
+  static __device__ inline constexpr int num() { return 2; }
   using unpacked_type = half;
   using packed_type = half_2;
   static __device__ inline todo_constexpr half_2 pack(const half &i) { return half_2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<float> {
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   using unpacked_type = float;
   using packed_type = float2;
   static __device__ inline todo_constexpr float2 pack(const float &i) { return float2{i, i}; }
 };
 template <>
 struct packing<float2> {
-  static __device__ inline todo_constexpr int num() { return 2; }
+  static __device__ inline constexpr int num() { return 2; }
   using unpacked_type = float;
   using packed_type = float2;
   static __device__ inline todo_constexpr float2 pack(const float &i) { return float2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<char> {
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   using unpacked_type = char;
   using packed_type = char2;
   static __device__ inline todo_constexpr char2 pack(const char &i) { return char2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<char2> {
-  static __device__ inline todo_constexpr int num() { return 2; }
+  static __device__ inline constexpr int num() { return 2; }
   using unpacked_type = char;
   using packed_type = char2;
   static __device__ inline todo_constexpr char2 pack(const char &i) { return char2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<int> {
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   using unpacked_type = int;
   using packed_type = int2;
   static __device__ inline todo_constexpr int2 pack(const int &i) { return int2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<int2> {
-  static __device__ inline todo_constexpr int num() { return 2; }
+  static __device__ inline constexpr int num() { return 2; }
   using unpacked_type = int;
   using packed_type = int2;
   static __device__ inline todo_constexpr int2 pack(const int &i) { return int2{i, i}; } // this replication makes code cleaner later.
@@ -238,25 +238,25 @@ struct uint64_2 {
 };
 template <>
 struct packing<uint64_t> {
-  static __device__ inline todo_constexpr int num() { return 1; }
+  static __device__ inline constexpr int num() { return 1; }
   using unpacked_type = uint64_t;
   using packed_type = uint64_2;
   static __device__ inline todo_constexpr uint64_2 pack(const uint64_t &i) { return uint64_2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<uint64_2> {
-  static __device__ inline todo_constexpr int num() { return 2; }
+  static __device__ inline constexpr int num() { return 2; }
   using unpacked_type = uint64_t;
   using packed_type = uint64_2;
   static __device__ inline todo_constexpr uint64_2 pack(const uint64_t &i) { return uint64_2{i, i}; } // this replication makes code cleaner later.
 };
 template <>
 struct packing<float4> {
-  static __device__ inline todo_constexpr int num() { return 4; }
+  static __device__ inline constexpr int num() { return 4; }
 };
 template <>
 struct packing<int4> {
-  static __device__ inline todo_constexpr int num() { return 4; }
+  static __device__ inline constexpr int num() { return 4; }
 };
 
 /**

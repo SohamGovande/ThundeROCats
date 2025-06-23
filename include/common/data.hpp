@@ -113,7 +113,12 @@ void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilo
   double min_error = errors.size() > 0 ? *std::min_element(errors.begin(), errors.end()) : 0;
   double max_error = errors.size() > 0 ? *std::max_element(errors.begin(), errors.end()) : 0;
 
+  double mean_abs_element_from_expected = std::accumulate(expected.begin(), expected.end(), 0.0, [](double acc, T const &val) { return acc + std::abs(base_types::convertor<float, T>::convert(val)); }) / expected.size();
+  double mean_abs_element_from_actual = std::accumulate(actual.begin(), actual.end(), 0.0, [](double acc, T const &val) { return acc + std::abs(base_types::convertor<float, T>::convert(val)); }) / actual.size();
+
   std::cout << "--------------------------------" << std::endl;
+  std::cout << "Mean absolute element from expected: " << std::fixed << std::setprecision(4) << mean_abs_element_from_expected << std::endl;
+  std::cout << "Mean absolute element from actual: " << std::fixed << std::setprecision(4) << mean_abs_element_from_actual << std::endl;
   std::cout << "Mean absolute error: " << std::fixed << std::setprecision(4) << mean_error << std::endl;
   std::cout << "Min absolute error: " << std::fixed << std::setprecision(4) << min_error << std::endl;
   std::cout << "Max absolute error: " << std::fixed << std::setprecision(4) << max_error << std::endl;
