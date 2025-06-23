@@ -7,12 +7,12 @@ namespace mm_ABt_ker {
 struct layout {
   // base sizes - feel free to change M/N dimensions on these
   static constexpr coord_mnk wave_tile_count{1, 1, 1};
-  static constexpr coord_mnk block_wave_count{1, 1, 1};
+  static constexpr coord_mnk block_wave_count{2, 2, 1};
 
   // derived  (or constant) sizes - do not change these
   static constexpr coord_mnk mma_atom_size{32, 32, 16};
   static constexpr coord_mnk wave_size = mma_atom_size * wave_tile_count;
-  static constexpr int num_waves = wave_tile_count.m * wave_tile_count.n * wave_tile_count.k;
+  static constexpr int num_waves = block_wave_count.m * block_wave_count.n * block_wave_count.k;
   static constexpr int num_threads = num_waves * WAVE_THREADS;
   static constexpr coord_mnk block_size = wave_size * block_wave_count;
 };
