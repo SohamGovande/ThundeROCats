@@ -6,7 +6,7 @@ using namespace kittens;
 namespace mm_ABt_ker {
 struct layout {
   // base sizes - feel free to change M/N dimensions on these
-  static constexpr coord_mnk wave_tile_count{2, 2, 1};
+  static constexpr coord_mnk wave_tile_count{2, 1, 1};
   static constexpr coord_mnk block_wave_count{2, 2, 1};
 
   // derived  (or constant) sizes - do not change these
@@ -42,8 +42,12 @@ __device__ inline void copy(RT_D &dst, RT_S &src) {
 
   for (int k = 0; k < dst.height; k++)
     for (int l = 0; l < dst.width; l++)
-      for (int m = 0; m < dst.tiles[k][l].packed_per_thread; m++)
+      for (int m = 0; m < dst.tiles[k][l].packed_per_thread; m++) {
         dst.tiles[k][l].data[m] = base_types::convertor<typename RT_D::dtype, typename RT_S::dtype>::convert(src.tiles[k][l].data[m]);
+        if (base_types::convertor<float, typename RT_D::T>::convert(dst.tiles[k][l].data[m].x) != 16.0f) {
+          printf("dst.tiles[%d][%d].data[%d] = %f\n", k, l, m, base_types::convertor<float, typename RT_D::T>::convert(dst.tiles[k][l].data[m].x));
+        }
+      }
 }
 
 __global__ __launch_bounds__(layout::num_threads) void gpu_matmul_ABt_ker(mm_ABt_ker::globals g) {
@@ -96,9 +100,9 @@ int main() {
   int N = layout::block_size.n;
   int K = layout::block_size.k;
 
-  auto [h_A, d_A] = init<fill_random, bf16>(M * K);
-  auto [h_B, d_B] = init<fill_random, bf16>(K * N);
-  auto [h_C, d_C] = init<fill_zeros, bf16>(M * N);
+  auto [h_A, d_A] = init<fill_ones, bf16>(M * K);
+  auto [h_B, d_B] = init<fill_ones, bf16>(K * N);
+  auto [h_C, d_C] = init<fill_ones, bf16>(M * N);
 
   auto h_C_ref = h_C;
   cpu_matmul<bf16, /* A */ false, /* B.bf16 */ true>(h_A.data(), h_B.data(), h_C_ref.data(), M, N, K);
