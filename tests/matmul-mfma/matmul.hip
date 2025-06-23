@@ -19,16 +19,16 @@ constexpr int MMA_ATOM_SIZE_M = 32;
 constexpr int MMA_ATOM_SIZE_N = 32;
 constexpr int MMA_ATOM_SIZE_K = 16;
 
-constexpr int WAVE_TILE_COUNT_M = 1;
-constexpr int WAVE_TILE_COUNT_N = 1;
+constexpr int WAVE_TILE_COUNT_M = 2;
+constexpr int WAVE_TILE_COUNT_N = 2;
 constexpr int WAVE_TILE_COUNT_K = 1;
 
 constexpr int WAVE_SIZE_M = MMA_ATOM_SIZE_M * WAVE_TILE_COUNT_M;
 constexpr int WAVE_SIZE_N = MMA_ATOM_SIZE_N * WAVE_TILE_COUNT_N;
 constexpr int WAVE_SIZE_K = MMA_ATOM_SIZE_K * WAVE_TILE_COUNT_K;
 
-constexpr int BLOCK_WAVE_COUNT_M = 1;
-constexpr int BLOCK_WAVE_COUNT_N = 1;
+constexpr int BLOCK_WAVE_COUNT_M = 2;
+constexpr int BLOCK_WAVE_COUNT_N = 2;
 constexpr int NUM_WAVES = BLOCK_WAVE_COUNT_M * BLOCK_WAVE_COUNT_N;
 constexpr int NUM_THREADS_PER_WAVE = warpSize;
 static_assert(NUM_THREADS_PER_WAVE == 64, "NUM_THREADS_PER_WAVE must be equal to 64. This was what the code was written for.");
@@ -168,11 +168,6 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(globals g) {
     for (int i = 0; i < WAVE_TILE_COUNT_N; i++)
       load(B.raw_ptr, N, K, &b_reg_old[i][0], wave_start_n + i, k_block / WAVE_SIZE_K);
 
-    for (int i = 0; i < a_reg_old[0].size(); i += 2) {
-      a_reg[0].tiles[0][0].data[i / 2] = {a_reg_old[0][i], a_reg_old[0][i + 1]};
-      b_reg[0].tiles[0][0].data[i / 2] = {b_reg_old[0][i], b_reg_old[0][i + 1]};
-    }
-
     for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
       for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
         mma_ABt(c_reg[i][j], a_reg[i], b_reg[j]);
@@ -240,9 +235,9 @@ void gpu_matmul_ABt(T *A, T *B, T *C, int M, int N, int K, std::vector<T> &h_C) 
 }
 
 int main() {
-  int M = BLOCK_SIZE_M;
-  int N = BLOCK_SIZE_N;
-  int K = BLOCK_SIZE_K;
+  int M = BLOCK_SIZE_M * 15;
+  int N = BLOCK_SIZE_N * 10;
+  int K = BLOCK_SIZE_K * 2;
 
   auto [h_A, d_A] = init<fill_random, T>(M * K);
   auto [h_B, d_B] = init<fill_random, T>(K * N);

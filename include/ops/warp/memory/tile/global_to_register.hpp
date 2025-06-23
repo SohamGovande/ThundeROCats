@@ -52,9 +52,11 @@ __device__ inline static void load(RT &dst, const GL &src, const COORD &idx) {
   for (int row_tile = 0; row_tile < RT::height; row_tile++) {
 #pragma unroll
     for (int col_tile = 0; col_tile < RT::width; col_tile++) {
-      using COORD_BASE = coord<typename RT::base_tile::layout>;
-      COORD_BASE coord_base(idx.b, idx.d, idx.r * RT::height + row_tile, idx.c * RT::width + col_tile);
-      U *src_ptr = (U *)&src[(coord_base.template unit_coord<axis, 3>())];
+      auto new_coord = idx.template unit_coord<axis, 3>();
+      new_coord.r += row_tile * RT::tile_size_row;
+      new_coord.c += col_tile * RT::tile_size_col;
+
+      auto src_ptr = (U *)&src[(new_coord)];
 
       auto &base_tile = dst.tiles[row_tile][col_tile];
       detail::load_rt_base(src_ptr, row_stride, base_tile.data);
