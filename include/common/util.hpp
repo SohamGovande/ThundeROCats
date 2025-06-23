@@ -162,4 +162,18 @@ public:
   }
 };
 
+struct coord_mnk {
+  int m, n, k;
+
+  constexpr coord_mnk(int m_, int n_, int k_) : m(m_), n(n_), k(k_) {}
+
+  friend constexpr coord_mnk operator*(coord_mnk a, coord_mnk b) {
+    return {a.m * b.m, a.n * b.n, a.k * b.k};
+  }
+
+  friend constexpr coord_mnk operator+(coord_mnk a, coord_mnk b) {
+    return {a.m + b.m, a.n + b.n, a.k + b.k};
+  }
+};
+
 } // namespace kittens
