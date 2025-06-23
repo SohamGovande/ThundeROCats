@@ -3,68 +3,61 @@
 
 using namespace kittens;
 
+namespace mm_ABt_ker {
+struct layout {
+  // base sizes - feel free to change M/N dimensions on these
+  static constexpr coord_mnk wave_tile_count{1, 1, 1};
+  static constexpr coord_mnk block_wave_count{1, 1, 1};
+
+  // derived  (or constant) sizes - do not change these
+  static constexpr coord_mnk mma_atom_size{32, 32, 16};
+  static constexpr coord_mnk wave_size = mma_atom_size * wave_tile_count;
+  static constexpr int num_waves = wave_tile_count.m * wave_tile_count.n * wave_tile_count.k;
+  static constexpr int num_threads = num_waves * WAVE_THREADS;
+  static constexpr coord_mnk block_size = wave_size * block_wave_count;
+};
+struct locals {
+  using layout = mm_ABt_ker::layout;
+  static constexpr int wave_tile_size_m = layout::wave_tile_count.m * layout::mma_atom_size.m;
+  static constexpr int wave_tile_size_n = layout::wave_tile_count.n * layout::mma_atom_size.n;
+
+  rt_bf<wave_tile_size_m, 16> a_reg;
+  rt_bf<wave_tile_size_n, 16> b_reg;
+  rt_fl<wave_tile_size_m, wave_tile_size_n, ducks::rt_layout::col> c_reg;
+  rt_bf<wave_tile_size_m, wave_tile_size_n, ducks::rt_layout::col> c_reg_half;
+};
 struct globals {
-  struct layout {
-    // base sizes - feel free to change these
-    static constexpr coord_mnk mma_atom_size{32, 32, 16};
-    // keep the k dimension on both of these equal to 1 - it doesn't make sense.
-    static constexpr coord_mnk wave_tile_count{2, 2, 1};
-    static constexpr coord_mnk block_wave_count{2, 2, 1};
-
-    // derived sizes - do not change these
-    static constexpr coord_mnk wave_size = mma_atom_size * wave_tile_count;
-    static constexpr int num_waves = wave_tile_count.m * wave_tile_count.n * wave_tile_count.k;
-    static constexpr int num_threads = num_waves * WAVE_THREADS;
-    static constexpr coord_mnk block_size = wave_size * block_wave_count;
-  };
   using abc_t = gl<bf16, -1, -1, -1, -1>;
-
   abc_t A, B, C;
 };
+}; // namespace mm_ABt_ker
 
-using layout = globals::layout;
+using layout = mm_ABt_ker::layout;
 
-__global__ __launch_bounds__(layout::num_threads) void gpu_matmul_ABt_ker(globals g) {
-  auto &[A, B, C] = g;
-  auto M = C.rows();
-  auto N = C.cols();
-  auto K = A.cols();
+template <ducks::rt::all RT_D, ducks::rt::all RT_S>
+__device__ inline void copy(RT_D &dst, RT_S &src) {
+  static_assert(RT_D::height == RT_S::height, "Heights must match");
+  static_assert(RT_D::width == RT_S::width, "Widths must match");
+  static_assert(RT_D::packed_per_thread == RT_S::packed_per_thread, "Packed per thread must match");
 
-  rt_bf<32, 16> a_reg[layout::wave_tile_count.m], b_reg[layout::wave_tile_count.n];
-  rt_fl<32, 32, ducks::rt_layout::col> c_reg[layout::wave_tile_count.m][layout::wave_tile_count.n];
-  rt_bf<32, 32, ducks::rt_layout::col> c_reg_half[layout::wave_tile_count.m][layout::wave_tile_count.n];
+  for (int k = 0; k < dst.height; k++)
+    for (int l = 0; l < dst.width; l++)
+      for (int m = 0; m < dst.tiles[k][l].packed_per_thread; m++)
+        dst.tiles[k][l].data[m] = base_types::convertor<typename RT_D::dtype, typename RT_S::dtype>::convert(src.tiles[k][l].data[m]);
+}
 
-  for (int i = 0; i < layout::wave_tile_count.m; i++)
-    for (int j = 0; j < layout::wave_tile_count.n; j++)
-      c_reg[i][j] = 0;
-
-  int waveid = threadIdx.x / WAVE_THREADS;
-  int waveid_m = waveid / layout::block_wave_count.n;
-  int waveid_n = waveid % layout::block_wave_count.n;
-  int wave_start_m = blockIdx.x * (layout::block_size.m / layout::mma_atom_size.m) + waveid_m * (layout::wave_size.m / layout::mma_atom_size.m);
-  int wave_start_n = blockIdx.y * (layout::block_size.n / layout::mma_atom_size.n) + waveid_n * (layout::wave_size.n / layout::mma_atom_size.n);
-
-  // GEMM mainloop
-  for (int k_block = 0; k_block < K; k_block += layout::wave_size.k) {
-    for (int i = 0; i < layout::wave_tile_count.m; i++)
-      load(a_reg[i], A, {wave_start_m + i, k_block / layout::wave_size.k});
-    for (int i = 0; i < layout::wave_tile_count.n; i++)
-      load(b_reg[i], B, {wave_start_n + i, k_block / layout::wave_size.k});
-
-    for (int i = 0; i < layout::wave_tile_count.m; i++)
-      for (int j = 0; j < layout::wave_tile_count.n; j++)
-        mma_ABt(c_reg[i][j], a_reg[i], b_reg[j]);
+__global__ __launch_bounds__(layout::num_threads) void gpu_matmul_ABt_ker(mm_ABt_ker::globals g) {
+  int wave_start_m = blockIdx.x * (layout::block_size.m / layout::wave_size.m) + (waveid() / layout::block_wave_count.n);
+  int wave_start_n = blockIdx.y * (layout::block_size.n / layout::wave_size.n) + (waveid() % layout::block_wave_count.n);
+  mm_ABt_ker::locals l;
+  zero(l.c_reg);
+  for (int k_block = 0; k_block < g.A.cols(); k_block += layout::wave_size.k) {
+    load(l.a_reg, g.A, {wave_start_m, k_block / layout::wave_size.k});
+    load(l.b_reg, g.B, {wave_start_n, k_block / layout::wave_size.k});
+    mm_ABt(l.c_reg, l.a_reg, l.b_reg);
   }
-  for (int i = 0; i < layout::wave_tile_count.m; i++)
-    for (int j = 0; j < layout::wave_tile_count.n; j++)
-      for (int k = 0; k < c_reg[i][j].height; k++)
-        for (int l = 0; l < c_reg[i][j].width; l++)
-          for (int m = 0; m < c_reg[i][j].tiles[k][l].packed_per_thread; m++)
-            c_reg_half[i][j].tiles[k][l].data[m] = base_types::convertor<bf16_2, float2>::convert(c_reg[i][j].tiles[k][l].data[m]);
-
-  for (int i = 0; i < layout::wave_tile_count.m; i++)
-    for (int j = 0; j < layout::wave_tile_count.n; j++)
-      store(C, c_reg_half[i][j], {wave_start_m + i, wave_start_n + j});
+  copy(l.c_reg_half, l.c_reg);
+  store(g.C, l.c_reg_half, {wave_start_m, wave_start_n});
 }
 
 void gpu_matmul_ABt(bf16 *A, bf16 *B, bf16 *C, int M, int N, int K, std::vector<bf16> &h_C) {
@@ -74,13 +67,13 @@ void gpu_matmul_ABt(bf16 *A, bf16 *B, bf16 *C, int M, int N, int K, std::vector<
   std::cout << "Launching with grid (" << grid.x << ", " << grid.y << ", " << grid.z << ") with block (" << block.x << ", " << block.y << ", " << block.z << ")" << std::endl;
   float ms = 0;
 
-  using gl_t = globals::abc_t;
+  using gl_t = mm_ABt_ker::globals::abc_t;
 
   gl_t g_A(A, 1, 1, M, K);
   gl_t g_B(B, 1, 1, N, K);
   gl_t g_C(C, 1, 1, M, N);
 
-  globals g{g_A, g_B, g_C};
+  mm_ABt_ker::globals g{g_A, g_B, g_C};
 
   // warmup kernel
   gpu_matmul_ABt_ker<<<grid, block>>>(g);
@@ -101,7 +94,7 @@ void gpu_matmul_ABt(bf16 *A, bf16 *B, bf16 *C, int M, int N, int K, std::vector<
 int main() {
   int M = layout::block_size.m * 20;
   int N = layout::block_size.n * 10;
-  int K = layout::block_size.k * 2;
+  int K = layout::block_size.k * 5;
 
   auto [h_A, d_A] = init<fill_random, bf16>(M * K);
   auto [h_B, d_B] = init<fill_random, bf16>(K * N);
