@@ -1,12 +1,12 @@
 #pragma once
 
+#include <random>
+#include <utility>
+#include <vector>
 #include <concepts>
 #include <fstream>
 #include <iomanip>
-#include <random>
 #include <sstream>
-#include <utility>
-#include <vector>
 
 static int seed = 0;
 
@@ -45,8 +45,9 @@ std::pair<std::vector<T>, T *> init(int N) {
   std::vector<T> h_data(N);
   fill_type fill;
   if (fill.has_value())
+    // I have no clue why static_cast here works but base_types::convertor<T, float>::convert doesn't
     for (int i = 0; i < N; i++)
-      h_data[i] = base_types::convertor<T, float>::convert(fill.value());
+      h_data[i] = static_cast<T>(fill.value());
 
   T *d_data;
   hipCheck(hipMalloc((void **)&d_data, N * sizeof(T)));
