@@ -45,9 +45,8 @@ std::pair<std::vector<T>, T *> init(int N) {
   std::vector<T> h_data(N);
   fill_type fill;
   if (fill.has_value())
-    // I have no clue why static_cast here works but base_types::convertor<T, float>::convert doesn't
     for (int i = 0; i < N; i++)
-      h_data[i] = static_cast<T>(fill.value());
+      h_data[i] = base_types::convertor<T, float>::convert(fill.value());
 
   T *d_data;
   hipCheck(hipMalloc((void **)&d_data, N * sizeof(T)));
@@ -99,7 +98,7 @@ void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilo
       errors.push_back(error);
 
       if (num_errors < max_errors_to_print)
-        ss << "Error at index " << i << ": Expected " << base_types::convertor<float, T>::convert(expected[i]) << " != Actual " << base_types::convertor<float, T>::convert(actual[i]) << std::endl;
+        ss << "Error at index " << i << ": Expected " << base_types::convertor<float, T>::convert(expected[i]) << " != Got " << base_types::convertor<float, T>::convert(actual[i]) << std::endl;
     }
   }
 
@@ -119,6 +118,8 @@ void assert_equal(std::vector<T> const &expected, RH const &actual, float epsilo
   std::cout << "Min absolute error: " << std::fixed << std::setprecision(4) << min_error << std::endl;
   std::cout << "Max absolute error: " << std::fixed << std::setprecision(4) << max_error << std::endl;
   std::cout << "Number of errors: " << num_errors << " (out of " << N << ", " << std::fixed << std::setprecision(2) << (100.0 * num_errors / N) << "%)" << std::endl;
+  std::cout << "Expected[:3]: " << base_types::convertor<float, T>::convert(expected[0]) << ", " << base_types::convertor<float, T>::convert(expected[1]) << ", " << base_types::convertor<float, T>::convert(expected[2]) << std::endl;
+  std::cout << "Got[:3]:      " << base_types::convertor<float, T>::convert(actual[0]) << ", " << base_types::convertor<float, T>::convert(actual[1]) << ", " << base_types::convertor<float, T>::convert(actual[2]) << std::endl;
   std::cout << "--------------------------------" << std::endl;
 }
 } // namespace kittens

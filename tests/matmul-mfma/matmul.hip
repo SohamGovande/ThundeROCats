@@ -143,7 +143,7 @@ __global__ __launch_bounds__(NUM_THREADS) void gpu_matmul_ABt_ker(T *A, T *B, T 
   for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
     for (int j = 0; j < WAVE_TILE_COUNT_N; j++)
       for (int k = 0; k < c_reg_half[i][j].size(); k++)
-        c_reg_half[i][j][k] = static_cast<bf16>(c_reg[i][j][k]);
+        c_reg_half[i][j][k] = __float2bfloat16(c_reg[i][j][k]);
 
   // Store the accumulators to global memory
   for (int i = 0; i < WAVE_TILE_COUNT_M; i++)
